@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- Configuration ---
-MODEL_NAME="gemma3:4b"
+MODEL_NAME="limbo"
 LLM_LIFESPAN_SECONDS=210
 REBOOT_PAUSE_SECONDS=20
 

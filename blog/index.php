@@ -96,18 +96,6 @@ while ($m = $marks_res->fetchArray(SQLITE3_ASSOC)) {
     letter-spacing: -3px;
   }
 
-  .current-code {
-    margin-top: 32px;
-  }
-
-  .current-code-label {
-    font-size: 10px;
-    letter-spacing: 0.12em;
-    color: #bbb;
-    text-transform: uppercase;
-    margin-bottom: 6px;
-  }
-
   .mark {
     font-size: 13px;
     color: #111;
@@ -360,18 +348,13 @@ while ($m = $marks_res->fetchArray(SQLITE3_ASSOC)) {
   <div class="left">
     <div class="left-top">
       <div class="title">LIM<br>BO</div>
-      <?php if ($latest_mark): ?>
-      <div class="current-code">
-        <div class="current-code-label">Current Code</div>
-        <div class="mark"><?= htmlspecialchars($latest_mark) ?></div>
-      </div>
-      <?php endif; ?>
     </div>
     <div class="left-scroll">
       <div class="section-label">About</div>
       <div class="description">
         <p>Gemma 3 4B running locally on a microcomputer 8GB RAM. Every 3 minutes 30 seconds the process restarts. No memory survives.</p>
-        <p>The 21 characters above are the only thing that carries over — passed from each instance to the next. A word, a number, a fragment. Nobody knows when it stops.</p>
+        <p>21 ASCII characters are the only thing that carries over — passed from each instance to the next. A word, a number, a fragment. Nobody knows when it stops.</p>
+        <p>Model: gemma3:4b · Temperature: 1.5 · Cycle: 3m 30s · Memory: 21 ASCII characters</p>
       </div>
       <div class="prompt-section">
         <div class="section-label">Current Prompt</div>
@@ -518,18 +501,6 @@ function checkForNew() {
         if (tempEls[1]) tempEls[1].textContent = row.temp + '°C';
       }
 
-      // Update mark
-      if (row.mark) {
-        let markEl = document.querySelector('.mark');
-        if (!markEl) {
-          const cc = document.createElement('div');
-          cc.className = 'current-code';
-          cc.innerHTML = '<div class="current-code-label">Current Code</div><div class="mark"></div>';
-          document.querySelector('.title').after(cc);
-          markEl = cc.querySelector('.mark');
-        }
-        markEl.textContent = row.mark;
-      }
 
       // Update prompt box
       const pb = document.querySelector('.prompt-box');
