@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash('/c/Program Files/PuTTY/plink.exe' -ssh -pw llm -batch -hostkey SHA256:Auear6g9Vkae5pPAXPq+/TfL+SrTdntioAIeOgExn5U llm@192.222.222.200 'python3 -c \":*)",
+      "Bash(\"/c/Program Files/PuTTY/pscp.exe\" -pw \"llm\" -hostkey \"SHA256:Auear6g9Vkae5pPAXPq+/TfL+SrTdntioAIeOgExn5U\" \"g:/Other computers/SUPERSTUDIO/htdocs/2025_07_limbo/limbo.sh\" llm@192.222.222.200:/home/llm/limbo.sh)",
+      "Bash(\"/c/Program Files/PuTTY/pscp.exe\" -pw \"llm\" -hostkey \"SHA256:Auear6g9Vkae5pPAXPq+/TfL+SrTdntioAIeOgExn5U\" \"g:/Other computers/SUPERSTUDIO/htdocs/2025_07_limbo/epaper_display.py\" llm@192.222.222.200:/home/llm/epaper_display.py)",
+      "Bash(\"/c/Program Files/PuTTY/plink.exe\" -ssh -pw \"llm\" -batch -hostkey \"SHA256:Auear6g9Vkae5pPAXPq+/TfL+SrTdntioAIeOgExn5U\" llm@192.222.222.200 \"sudo systemctl restart limbo && echo done\")",
+      "Bash(plink -ssh llm@192.222.222.200 -pw llm -batch \"cat > /home/llm/limbo.sh\")",
+      "Bash(plink -ssh llm@192.222.222.200 -pw llm -batch \"sudo systemctl restart limbo\")"
+    ]
+  }
+}

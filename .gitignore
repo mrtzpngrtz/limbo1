@@ -1,4 +1,5 @@
 blog/limbo.db
+blog/config.php
 blog/*.apk
 *.OTF
 *.otf

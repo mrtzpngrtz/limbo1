@@ -1,5 +1,6 @@
 <?php
-define('POST_KEY', 'Lmb0_X9k2P4mQ7rT');
+$_cfg = require __DIR__ . '/config.php';
+define('POST_KEY', $_cfg['post_key']);
 
 if (($_POST['key'] ?? '') !== POST_KEY) {
     http_response_code(403);
