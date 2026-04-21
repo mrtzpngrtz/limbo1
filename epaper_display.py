@@ -1,143 +1,141 @@
 #!/usr/bin/env python3
+# Usage: echo "body text" | python3 epaper_display.py "LIMBO — Cycle #N" "MARK12345"
+
 import sys
-import textwrap
+import re
 import time
-import os
-sys.path.insert(0, "/home/llm/e-Paper/RaspberryPi_JetsonNano/python/lib")
-from waveshare_epd import epd7in5
+
+sys.path.insert(0, '/home/llm/.local/lib/python3.11/site-packages/epaper/e-Paper/RaspberryPi_JetsonNano/python/lib/')
+from waveshare_epd import epd7in5bc
 from PIL import Image, ImageDraw, ImageFont
 
-# e-paper native: 640x384, displayed portrait: 384 wide x 640 tall
-P_WIDTH  = 384
-P_HEIGHT = 640
+W, H = 384, 640  # portrait
+MARGIN_X = 18
+MARGIN_Y = 16
+PAGE_PAUSE = 8000
+FONT_DIR = '/usr/share/fonts/truetype/dejavu/'
 
-MARGIN_X = 28
-MARGIN_Y = 36
+SIZE_TITLE  = 88
+SIZE_CYCLE  = 18
+SIZE_MARK   = 22
+SIZE_BODY   = 17
+LINE_H      = 21
 
-FONT_PATH = "/home/llm/limbo_font.ttf"
-FONT_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-SIZE_TITLE  = 48
-SIZE_CYCLE  = 15
-SIZE_BODY   = 14
-PAGE_PAUSE  = 8
 
 def load_font(size, bold=False):
-    path = FONT_PATH if os.path.exists(FONT_PATH) else FONT_FALLBACK
-    # Try bold variant for title
-    if bold:
-        bold_path = FONT_PATH.replace(".ttf", "-Bold.ttf") if os.path.exists(FONT_PATH) else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        try:
-            return ImageFont.truetype(bold_path, size)
-        except:
-            pass
+    name = 'DejaVuSans-Bold.ttf' if bold else 'DejaVuSans.ttf'
     try:
-        return ImageFont.truetype(path, size)
-    except:
+        return ImageFont.truetype(FONT_DIR + name, size)
+    except Exception:
         return ImageFont.load_default()
 
-def render(cycle_num, text, mark=""):
-    epd = epd7in5.EPD()
-    epd.init()
-    epd.Clear()
+
+def wrap(text, font, max_w):
+    dummy = ImageDraw.Draw(Image.new('1', (1, 1), 0))
+    words = text.split()
+    lines, cur = [], ''
+    for w in words:
+        test = (cur + ' ' + w).strip()
+        if dummy.textbbox((0, 0), test, font=font)[2] > max_w and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def build_page(lines, title, mark, page_num, total_pages):
+    img = Image.new('1', (W, H), 0)  # black background
+    d = ImageDraw.Draw(img)
 
     font_title = load_font(SIZE_TITLE, bold=True)
     font_cycle = load_font(SIZE_CYCLE)
+    font_mark  = load_font(SIZE_MARK, bold=True)
     font_body  = load_font(SIZE_BODY)
 
-    # Measure header height
-    header_h = MARGIN_Y + SIZE_TITLE + 8 + SIZE_CYCLE + 32
+    y = MARGIN_Y
 
-    # Available height for body text
-    body_h = P_HEIGHT - header_h - MARGIN_Y
-    line_h = SIZE_BODY + 5
-    lines_per_page = body_h // line_h
+    # LIM / BO
+    d.text((MARGIN_X, y), 'LIM', font=font_title, fill=255)
+    y += int(SIZE_TITLE * 0.92)
+    d.text((MARGIN_X, y), 'BO', font=font_title, fill=255)
+    y += int(SIZE_TITLE * 0.92) + 10
 
-    # Estimate chars per line
-    avg_char_w = SIZE_BODY * 0.52
-    max_chars = int((P_WIDTH - MARGIN_X * 2) / avg_char_w)
+    # separator
+    d.line([(MARGIN_X, y), (W - MARGIN_X, y)], fill=255, width=1)
+    y += 8
 
-    all_lines = []
-    for para in text.split("\n"):
-        wrapped = textwrap.wrap(para.strip(), width=max_chars)
-        all_lines.extend(wrapped if wrapped else [""])
+    # cycle title
+    d.text((MARGIN_X, y), title, font=font_cycle, fill=255)
+    y += SIZE_CYCLE + 10
 
-    pages = [all_lines[i:i+lines_per_page] for i in range(0, len(all_lines), lines_per_page)]
-    if not pages:
-        pages = [[]]
+    # mark
+    if mark:
+        d.text((MARGIN_X, y), mark, font=font_mark, fill=255)
+        y += SIZE_MARK + 12
 
-    font_cycle_bold = load_font(SIZE_CYCLE, bold=True)
+    # separator
+    d.line([(MARGIN_X, y), (W - MARGIN_X, y)], fill=255, width=1)
+    y += 10
 
-    def render_page(page_lines, page_idx):
-        img = Image.new("1", (P_WIDTH, P_HEIGHT), 0)
-        d = ImageDraw.Draw(img)
+    # body lines
+    for line in lines:
+        if y + LINE_H > H - MARGIN_Y:
+            break
+        d.text((MARGIN_X, y), line, font=font_body, fill=255)
+        y += LINE_H
 
-        y = MARGIN_Y
+    # page indicator
+    if total_pages > 1:
+        pi = f'{page_num}/{total_pages}'
+        d.text((W - MARGIN_X - 40, H - MARGIN_Y - 16), pi, font=font_cycle, fill=255)
 
-        # LIM / BO
-        d.text((MARGIN_X, y), "LIM", font=font_title, fill=255)
-        y += int(SIZE_TITLE * 0.92)
-        d.text((MARGIN_X, y), "BO", font=font_title, fill=255)
-        y += SIZE_TITLE + 20
+    return img
 
-        # Zyklus #N
-        d.text((MARGIN_X, y), "Zyklus ", font=font_cycle, fill=255)
-        prefix_w = int(len("Zyklus ") * SIZE_CYCLE * 0.52)
-        d.text((MARGIN_X + prefix_w, y), f"#{cycle_num}", font=font_cycle_bold, fill=255)
-        y += SIZE_CYCLE + 20
 
-        # Mark (10 chars)
-        if mark:
-            font_mark = load_font(SIZE_CYCLE)
-            d.text((MARGIN_X, y), mark, font=font_mark, fill=255)
-            y += SIZE_CYCLE + 20
+def render(title, text, mark=''):
+    font_body = load_font(SIZE_BODY)
+    max_w = W - MARGIN_X * 2
 
-        y += 12
+    # estimate lines that fit after header
+    font_title = load_font(SIZE_TITLE, bold=True)
+    header_h = (MARGIN_Y
+                + int(SIZE_TITLE * 0.92) * 2 + 10
+                + 1 + 8
+                + SIZE_CYCLE + 10
+                + (SIZE_MARK + 12 if mark else 0)
+                + 1 + 10)
+    lines_per_page = max(1, (H - header_h - MARGIN_Y) // LINE_H)
 
-        # Body
-        for line in page_lines:
-            d.text((MARGIN_X, y), line, font=font_body, fill=255)
-            y += line_h
+    all_lines = wrap(text, font_body, max_w)
+    if not all_lines:
+        all_lines = ['']
 
-        # Page indicator
-        if len(pages) > 1:
-            d.text((P_WIDTH - MARGIN_X - 30, P_HEIGHT - MARGIN_Y), f"{page_idx+1}/{len(pages)}", font=font_cycle, fill=255)
+    pages = [all_lines[i:i + lines_per_page]
+             for i in range(0, len(all_lines), lines_per_page)]
 
-        img = img.rotate(90, expand=True)
-        epd.display(epd.getbuffer(img))
+    epd = epd7in5bc.EPD()
+    epd.init()
 
-    if len(pages) == 1:
-        render_page(pages[0], 0)
-        epd.sleep()
-    else:
-        while True:
-            for i, page_lines in enumerate(pages):
-                render_page(page_lines, i)
-                time.sleep(PAGE_PAUSE)
-                epd.init()
+    page_idx = 0
+    while True:
+        img = build_page(pages[page_idx], title, mark, page_idx + 1, len(pages))
+        red = Image.new('1', (W, H), 255)
+        epd.display(epd.getbuffer(img), epd.getbuffer(red))
 
-if __name__ == "__main__":
-    title_arg = sys.argv[1] if len(sys.argv) > 1 else "Cycle #0"
-    mark_arg  = sys.argv[2] if len(sys.argv) > 2 else ""
-    try:
-        cycle_num = title_arg.split("#")[1].strip()
-    except:
-        cycle_num = "0"
+        if len(pages) <= 1:
+            break
+        epd.delay_ms(PAGE_PAUSE)
+        page_idx = (page_idx + 1) % len(pages)
 
-    import re, io
+    epd.sleep()
 
-    raw = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace').read()
 
-    # Normalize literal \n sequences to real newlines
-    raw = raw.replace('\\n', '\n')
-
-    # Strip ANSI escape codes
-    raw = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', raw)
-    raw = re.sub(r'\x1b[^a-zA-Z]*[a-zA-Z]', '', raw)
-
-    # Keep printable ASCII + German umlauts, no MARK line
-    raw = re.sub(r'[^\x20-\x7eäöüÄÖÜß\n]', '', raw)
-    raw = re.sub(r'(?m)^MARK:.*$', '', raw)
-    raw = re.sub(r' +', ' ', raw).strip()
-
-    render(cycle_num, raw, mark_arg)
+if __name__ == '__main__':
+    title = sys.argv[1] if len(sys.argv) > 1 else 'LIMBO'
+    mark  = sys.argv[2] if len(sys.argv) > 2 else ''
+    raw   = sys.stdin.read().strip()
+    text  = re.sub(r'(?m)^MARK:.*\n?', '', raw).strip()
+    render(title, text, mark)
