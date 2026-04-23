@@ -4,6 +4,8 @@ An art installation by [AOP.Studio](https://aop.studio) / [Moritz Pongratz](http
 
 **[→ Live at aop.studio/limbo1](https://aop.studio/limbo1)**
 
+![experimental installation](blog/2026_limbo1.png)
+
 ---
 
 ## Concept
