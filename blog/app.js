@@ -1,3 +1,17 @@
+function toggleNight() {
+  const isNight = document.body.classList.toggle('night');
+  localStorage.setItem('nightMode', isNight ? '1' : '0');
+  document.getElementById('night-toggle').textContent = isNight ? 'Day' : 'Night';
+}
+
+if (localStorage.getItem('nightMode') === '1') {
+  document.body.classList.add('night');
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('night-toggle');
+    if (btn) btn.textContent = 'Day';
+  });
+}
+
 function toggle(entry) {
   const isOpen = entry.classList.contains('open');
   document.querySelectorAll('.entry.open').forEach(e => e.classList.remove('open'));
@@ -33,6 +47,47 @@ function copyLink(e, cycle) {
   setTimeout(() => { btn.textContent = 'link'; btn.classList.remove('copied'); }, 1500);
 }
 
+function togglePostSection(hd) {
+  const bd = hd.nextElementSibling;
+  if (hd.classList.contains('collapsed')) {
+    hd.classList.remove('collapsed');
+    bd.style.maxHeight = bd.scrollHeight + 'px';
+    bd.addEventListener('transitionend', () => { bd.style.maxHeight = 'none'; }, { once: true });
+  } else {
+    hd.classList.add('collapsed');
+    bd.style.maxHeight = bd.scrollHeight + 'px';
+    requestAnimationFrame(() => requestAnimationFrame(() => { bd.style.maxHeight = '0'; }));
+  }
+}
+
+function applyBold(t) {
+  return t.replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>');
+}
+
+function buildPostSections(text) {
+  const fmt = s => applyBold(s.replace(/\n/g, '<br>'));
+  const m = text.match(/\nPLAN:/i);
+  if (!m) return `<p>${fmt(text)}</p>`;
+  const thinking = text.slice(0, text.indexOf(m[0])).trim();
+  const plan = text.slice(text.indexOf(m[0]) + m[0].length).trim();
+  return `<div class="post-sections">
+    <div class="post-section">
+      <div class="post-section-hd collapsed" onclick="togglePostSection(this)">
+        <span>Thinking Process</span><span class="post-section-arrow">↓&#xFE0E;</span>
+      </div>
+      <div class="post-section-bd" style="max-height:0">
+        <p>${fmt(thinking)}</p>
+      </div>
+    </div>
+    <div class="post-section">
+      <div class="post-section-hd no-toggle"><span>Plan</span></div>
+      <div class="post-section-bd">
+        <p>${fmt(plan)}</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 function buildEntry(row, receivedMark) {
   const marksHtml = (receivedMark || row.mark) ? `
     <div class="entry-marks">
@@ -41,24 +96,18 @@ function buildEntry(row, receivedMark) {
     </div>` : '';
   const { time, date } = formatParts(row.created_at);
   const div = document.createElement('div');
-  div.className = 'entry entry-new open';
+  div.className = 'entry entry-new open entry-latest';
   div.id = 'cycle-' + row.cycle;
-  const imgHtml = row.image ? `<img class="entry-cam" src="data:image/png;base64,${row.image}" alt="">` : '';
+  const imgHtml = row.image ? `<div class="entry-cam-wrap"><img class="entry-cam" src="data:image/png;base64,${row.image}" alt=""></div>` : '';
   div.innerHTML = `
     <div class="entry-header" onclick="toggle(this.parentElement)">
-      ${row.mark ? `<span class="entry-mark">${row.mark}</span>` : ''}
-      <span class="entry-meta">
-        <span class="ecycle">#${row.cycle}</span>
-        <span class="sep">/</span>
-        <span>${time}</span>
-        <span class="sep">/</span>
-        <span>${date}</span>
-        ${row.temp ? `<span class="sep">/</span><span>${row.temp}°C</span>` : ''}
-      </span>
+      <span class="ecycle">${row.cycle}</span>
+      <span class="entry-mark">${row.mark || ''}</span>
+      <span class="entry-meta">${time} · ${date}${row.temp ? ` · ${row.temp}°C` : ''}</span>
       <button class="entry-copy" onclick="copyLink(event, ${row.cycle})">link</button>
       <span class="entry-arrow">↓&#xFE0E;</span>
     </div>
-    <div class="entry-text"><div class="entry-body">${imgHtml}<p>${row.text.replace(/\n/g, '<br>')}</p></div>${marksHtml}</div>`;
+    <div class="entry-text"><div class="entry-body">${imgHtml}${buildPostSections(row.text)}</div>${marksHtml}</div>`;
   return div;
 }
 
@@ -70,6 +119,7 @@ function checkForNew() {
       latestId = row.id;
 
       document.querySelectorAll('.entry.open').forEach(e => e.classList.remove('open'));
+      document.querySelectorAll('.entry-latest').forEach(e => e.classList.remove('entry-latest'));
 
       const list = document.querySelector('.right');
       const header = document.querySelector('.list-header');
@@ -131,6 +181,3 @@ if (sentinel) {
   }, { root: document.querySelector('.right'), threshold: 0.1 }).observe(sentinel);
 }
 
-if (window.innerWidth <= 700) {
-  document.getElementById('fold-about')?.classList.remove('open');
-}

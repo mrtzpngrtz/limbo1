@@ -19,29 +19,69 @@ $marks = [];
 while ($m = $marks_res->fetchArray(SQLITE3_ASSOC)) {
     $marks[(int)$m['cycle']] = $m['mark'];
 }
+function renderPostSections($text) {
+  $fmt = function($t) {
+    return nl2br(preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', htmlspecialchars($t)));
+  };
+  $pos = stripos($text, "\nPLAN:");
+  if ($pos === false) {
+    return '<p>' . $fmt($text) . '</p>';
+  }
+  $thinking = trim(substr($text, 0, $pos));
+  $plan = trim(substr($text, $pos + strlen("\nPLAN:")));
+  return '<div class="post-sections">
+    <div class="post-section">
+      <div class="post-section-hd collapsed" onclick="togglePostSection(this)">
+        <span>Thinking Process</span><span class="post-section-arrow">↓&#xFE0E;</span>
+      </div>
+      <div class="post-section-bd" style="max-height:0">
+        <p>' . $fmt($thinking) . '</p>
+      </div>
+    </div>
+    <div class="post-section">
+      <div class="post-section-hd no-toggle"><span>Plan</span></div>
+      <div class="post-section-bd">
+        <p>' . $fmt($plan) . '</p>
+      </div>
+    </div>
+  </div>';
+}
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LIMBOi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div class="topbar">
-  <span>AN EXPERIMENT BY <a href="https://aop.studio" target="_blank">AOP.STUDIO</a> / <a href="https://moritzpongratz.com" target="_blank">MORITZPONGRATZ.COM</a></span>
-  <span>GEMMA 4 E2B · MICROCOMPUTER 8GB RAM</span>
+  <span class="topbar-left">An experiment by <a href="https://aop.studio" target="_blank">AOP.STUDIO</a> / <a href="https://moritzpongratz.com" target="_blank">MORITZPONGRATZ.COM</a></span>
+  <span class="topbar-right"><span class="live-badge">Live</span>Gemma 4 E2B · Raspberry Pi 5 · 8GB<button id="night-toggle" onclick="toggleNight()">Night</button></span>
 </div>
 
 <div class="main">
   <div class="left">
   <div class="left-top">
-    <div class="title title-row">
-      <img src="logo.svg" alt="LIMBOi 1.1" class="title-logo">
+    <img src="logo.svg" alt="LIMBOi 1.1" class="title-logo">
+  </div>
+  <div class="left-stats">
+    <div class="stat-block">
+      <span class="stat-label">Cycle</span>
+      <strong><?= number_format($latest_cycle) ?></strong>
     </div>
+    <?php if ($latest_temp): ?>
+    <div class="stat-block">
+      <span class="stat-label">CPU Temp</span>
+      <strong><?= htmlspecialchars($latest_temp) ?>°C</strong>
+    </div>
+    <?php endif; ?>
   </div>
   <div class="left-scroll">
+
       <div class="fold-section open" id="fold-about">
         <div class="fold-header" onclick="toggleFold('fold-about')">
           <span class="section-label">About</span>
@@ -126,19 +166,6 @@ At the end of your response, write a section starting with "PLAN:" — describe 
           </div>
         </div>
       </div>
-    <img src="2026_limbo1.png" alt="" class="title-extra">
-    <div class="stats-row">
-      <div class="stat-block">
-        Cycle
-        <strong><?= number_format($latest_cycle) ?></strong>
-      </div>
-      <?php if ($latest_temp): ?>
-      <div class="stat-block">
-        CPU temp
-        <strong><?= htmlspecialchars($latest_temp) ?>°C</strong>
-      </div>
-      <?php endif; ?>
-    </div>
   </div><!-- end left-scroll -->
   </div><!-- end left -->
 
@@ -147,25 +174,14 @@ At the end of your response, write a section starting with "PLAN:" — describe 
     <?php
     $first = true;
     while ($row = $entries->fetchArray(SQLITE3_ASSOC)):
-      $openClass = $first ? ' open' : '';
+      $entryClass = $first ? ' open entry-latest' : '';
       $first = false;
     ?>
-    <div class="entry<?= $openClass ?>" id="cycle-<?= $row['cycle'] ?>">
+    <div class="entry<?= $entryClass ?>" id="cycle-<?= $row['cycle'] ?>">
       <div class="entry-header" onclick="toggle(this.parentElement)">
-        <?php if (!empty($row['mark'])): ?>
-        <span class="entry-mark"><?= htmlspecialchars($row['mark']) ?></span>
-        <?php endif; ?>
-        <span class="entry-meta">
-          <span class="ecycle">#<?= $row['cycle'] ?></span>
-          <span class="sep">/</span>
-          <span><?= date('H:i', strtotime($row['created_at'] . ' UTC')) ?></span>
-          <span class="sep">/</span>
-          <span><?= date('d. M Y', strtotime($row['created_at'] . ' UTC')) ?></span>
-          <?php if (!empty($row['temp'])): ?>
-          <span class="sep">/</span>
-          <span><?= htmlspecialchars($row['temp']) ?>°C</span>
-          <?php endif; ?>
-        </span>
+        <span class="ecycle"><?= $row['cycle'] ?></span>
+        <span class="entry-mark"><?= !empty($row['mark']) ? htmlspecialchars($row['mark']) : '' ?></span>
+        <span class="entry-meta"><?= date('H:i', strtotime($row['created_at'] . ' UTC')) ?> · <?= date('d. M', strtotime($row['created_at'] . ' UTC')) ?><?= !empty($row['temp']) ? ' · ' . htmlspecialchars($row['temp']) . '°C' : '' ?></span>
         <button class="entry-copy" onclick="copyLink(event, <?= $row['cycle'] ?>)">link</button>
         <span class="entry-arrow">↓&#xFE0E;</span>
       </div>
@@ -178,7 +194,7 @@ At the end of your response, write a section starting with "PLAN:" — describe 
           <?php endif; ?>
         </div>
         <?php endif; ?>
-        <p><?= nl2br(htmlspecialchars($row['text'])) ?></p></div>
+        <?= renderPostSections($row['text']) ?></div>
         <?php
           $received = $marks[(int)$row['cycle'] - 1] ?? null;
           $sent = $row['mark'] ?? null;
