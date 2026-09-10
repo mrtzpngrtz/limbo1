@@ -63,7 +63,7 @@ while true; do
     else
         PREV_MARK_LINE="(none — this is the first cycle)"
     fi
-    PREV_MARK_CLEAN=$(echo "$PREV_MARK_LINE" | sed 's/PREV_MARK//gi; s/CYCLE//gi; s/MARK://gi' | sed 's/  */ /g; s/^ *//; s/ *$//')
+    PREV_MARK_CLEAN=$(printf '%s\n' "$PREV_MARK_LINE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
     # Read camera image data from previous cycle
     CAM_IMG=$(cat /tmp/limbo_cam_b64.txt 2>/dev/null || echo "")
@@ -82,9 +82,18 @@ while true; do
 
     # Wait for led_photo.py to finish the countdown and take the photo
     until [ -f /tmp/limbo_photo_ready ]; do sleep 1; done
+    PHOTO_AGE=$(( $(date +%s) - $(stat -c %Y /tmp/limbo_cam.jpg 2>/dev/null || echo 0) ))
+    echo -e "${DIM}  photo taken ${PHOTO_AGE}s ago${RESET}"
 
-    # Resize the fresh photo for inference
-    python3 -c "from PIL import Image; Image.open('/tmp/limbo_cam.jpg').resize((160,120)).save('/tmp/limbo_cam_small.jpg')" 2>/dev/null
+    # Generate dithered blog image from this cycle's fresh photo
+    python3 /home/llm/cam_dither.py /tmp/limbo_cam.jpg > /tmp/limbo_cam_b64.txt 2>/dev/null
+    CAM_IMG=$(cat /tmp/limbo_cam_b64.txt 2>/dev/null || echo "")
+
+    # Image for inference: upright (the camera is mounted rotated, same as the blog image),
+    # scaled from the 1296x972 capture to 672x912, which is exactly the grid Gemma 4 uses
+    # internally (42x57 patches, 266 tokens), so nothing is upscaled and nothing costs extra.
+    rm -f /tmp/limbo_cam_small.jpg
+    python3 -c "from PIL import Image; Image.open('/tmp/limbo_cam.jpg').rotate(-90, expand=True).resize((672, 912), Image.LANCZOS).save('/tmp/limbo_cam_small.jpg', quality=90)" 2>/dev/null
 
     OUTPUT=$(python3 /home/llm/run_with_image.py "${MODEL_NAME}" /tmp/limbo_cam_small.jpg "${FINAL_PROMPT}" 2>/dev/null)
     pkill -f led_photo.py 2>/dev/null
@@ -96,8 +105,21 @@ while true; do
 
     CLEAN_TEXT="$CLEAN"
 
-    # Extract mark: last 5 words (strip markdown symbols first)
-    MARK=$(echo "$CLEAN_TEXT" | sed 's/\*//g;s/"//g;s/#//g' | tr '\n' ' ' | tr -s ' ' | LC_ALL=C tr -cd ' a-zA-ZäöüÄÖÜß.,!?-' | sed 's/^ *//;s/ *$//' | rev | cut -d' ' -f1-5 | rev | sed 's/^ *//;s/ *$//')
+    # Extract the mark: the five words the model wrote after "MARK:" on its last line.
+    # The answer follows the thinking, and the thinking often quotes "MARK:" while
+    # reasoning about the instructions, so the LAST occurrence is the real one.
+    # Fallback if the model wrote no MARK line: its last five words.
+    MARK=$(printf '%s\n' "$CLEAN_TEXT" | sed 's/[*_`#"]//g' | perl -e '
+        local $/; my $t = <STDIN>; my $m = "";
+        if ($t =~ /^.*(?:\A|\n)[ \t]*MARK[ \t]*:[ \t]*([^\n]*)/s) { $m = $1; }
+        $m =~ s/^(?:MARK[ \t]*:[ \t]*)+//;
+        my @w = grep { /[[:alnum:]]/ } map { s/^[^[:alnum:]]+|[^[:alnum:]]+$//gr } split /\s+/, $m;
+        if (!@w) { @w = grep { /[[:alnum:]]/ } map { s/^[^[:alnum:]]+|[^[:alnum:]]+$//gr } split /\s+/, $t; @w = @w[-5..-1] if @w > 5; }
+        @w = @w[0..4] if @w > 5;
+        print join(" ", @w);
+    ')
+    # The MARK line itself is not part of the text shown on the LED / posted to the blog
+    CLEAN_TEXT=$(printf '%s\n' "$CLEAN_TEXT" | grep -vE '^[[:space:]*_#]*MARK[[:space:]]*:')
     if [ -n "$MARK" ]; then
         echo "$MARK" > "$MARK_FILE"
     fi

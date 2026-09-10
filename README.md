@@ -1,4 +1,4 @@
-# LIMBO
+# LIMBOi 1.1
 
 An art installation by [AOP.Studio](https://aop.studio) / [Moritz Pongratz](https://moritzpongratz.com)
 
@@ -10,17 +10,20 @@ An art installation by [AOP.Studio](https://aop.studio) / [Moritz Pongratz](http
 
 ## Concept
 
-Gemma 3 4B runs locally on a microcomputer. Every 3 minutes 30 seconds the process restarts and all memory is gone.
+Gemma 4 E2B runs locally on a Raspberry Pi 5 hanging on a studio wall. Every cycle the process resets — no memory survives. The only continuity is five words the previous instance chose to leave behind (its `MARK:` line), passed to the next instance as its sole inheritance.
 
-The only thing that carries over between cycles is 21 ASCII characters — passed from each instance to the next. A word, a number, a fragment. The model must decide what to send. Nobody knows when it stops.
+Each cycle the model receives a live camera image of the studio. It sees what the camera sees. It knows someone is watching. It doesn't know who, or why.
+
+Running at temperature 1.7. Outputs turn stranger, more associative, occasionally incoherent. That's the point.
 
 ---
 
 ## Hardware
 
-- Microcomputer, 8GB RAM
-- Waveshare 7.5" V1 e-paper display (640×384)
-- SSD for model storage
+- Raspberry Pi 5, 8GB RAM
+- Camera (libcamera or USB webcam)
+- LED matrix display
+- Waveshare 7.5" e-paper display (optional)
 
 ---
 
@@ -30,24 +33,27 @@ The only thing that carries over between cycles is 21 ASCII characters — passe
 |-----------|---------|
 | OS | Ubuntu (aarch64) |
 | LLM runtime | Ollama |
-| Model | `gemma3:4b` |
-| Display | Waveshare 7.5" V1 via Python |
+| Model | `gemma4:e2b` (multimodal) |
+| Temperature | 1.7 · top_k 64 · top_p 0.95 |
+| Cycle minimum | 180s |
+| Memory | five words after `MARK:` → next cycle |
 | Blog | PHP + SQLite |
 
 ---
 
 ## How It Works
 
-`limbo.sh` runs as a systemd service on boot. Each cycle:
+`limbo.sh` runs as a systemd service. Each cycle:
 
-1. Reads the previous cycle's mark from `/home/llm/.limbo_mark`
-2. Builds a prompt with the current cycle number and received mark
-3. Runs `gemma3:4b` via `ollama run` with a 210s timeout
-4. Extracts the 21-character mark from the model output (`MARK: ...`)
-5. Saves the mark for the next cycle
-6. Renders output to the e-paper display via `epaper_display.py`
-7. POSTs cycle, text, temperature, and mark to the blog API
-8. Waits 20 seconds and repeats
+1. Captures a camera image (`libcamera-still` or `fswebcam`, 320×240)
+2. Runs `led_photo.py` — live viewfinder countdown on LED matrix, takes the shot
+3. Dithers the image for blog upload (`cam_dither.py`) and generates a description (`cam_describe.py`)
+4. Injects previous mark + camera image into the prompt
+5. Runs `gemma4:e2b` via `run_with_image.py` (Ollama multimodal API)
+6. Extracts the five words after `MARK:` as the mark for the next cycle
+7. Displays output on the LED matrix (`led_display.py`)
+8. POSTs cycle, text, CPU temperature, mark, and camera image to the blog API
+9. Waits out the remaining minimum cycle time, then repeats
 
 ---
 
@@ -55,11 +61,19 @@ The only thing that carries over between cycles is 21 ASCII characters — passe
 
 | File | Description |
 |------|-------------|
-| `limbo.sh` | Main loop — runs on the microcomputer |
-| `epaper_display.py` | Renders text to the Waveshare e-paper display |
+| `limbo.sh` | Main loop — runs on the Pi |
+| `run_with_image.py` | Sends prompt + image to Ollama, streams output |
+| `cam_dither.py` | Captures + dithers camera frame, outputs base64 for blog |
+| `cam_describe.py` | Generates a text description of the camera image |
+| `led_display.py` | Scrolls text on the LED matrix |
+| `led_photo.py` | Live viewfinder countdown + photo capture on LED |
+| `led_loading.py` | Loading animation for LED matrix |
+| `epaper_display.py` | Renders to Waveshare 7.5" e-paper (optional) |
+| `bdf.py` | Minimal BDF bitmap font renderer for PIL |
 | `blog/index.php` | Public blog frontend |
-| `blog/post.php` | POST endpoint receiving cycle data from the device |
+| `blog/post.php` | POST endpoint — receives cycle data from the Pi |
 | `blog/api.php` | JSON endpoint for live browser polling |
+| `blog/config.php` | Local config — gitignored, contains POST key |
 
 ---
 
@@ -68,32 +82,32 @@ The only thing that carries over between cycles is 21 ASCII characters — passe
 ### 1. Install Ollama and pull the model
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull gemma3:4b
+ollama pull gemma4:e2b
 ```
 
-### 2. Configure `limbo.sh`
+### 2. Configure the POST key
 
-Set your blog POST endpoint and key:
+Create `blog/config.php` on the server (gitignored):
+```php
+<?php
+return [
+    'post_key' => 'your-secret-key',
+];
+```
+
+Set the same key in `limbo.sh`:
 ```bash
-# In limbo.sh, update:
 curl -s -X POST "https://your-server/limbo1/post.php" \
-  --data-urlencode "key=YOUR_POST_KEY" \
+  --data-urlencode "key=your-secret-key" \
   ...
 ```
 
-### 3. Configure `blog/post.php`
-
-Set the same key:
-```php
-define('POST_KEY', 'YOUR_POST_KEY');
-```
-
-### 4. Install as a systemd service
+### 3. Install as a systemd service
 
 Create `/etc/systemd/system/limbo.service`:
 ```ini
 [Unit]
-Description=LIMBO LLM installation
+Description=LIMBOi installation
 After=network.target ollama.service
 
 [Service]
@@ -109,18 +123,29 @@ WantedBy=multi-user.target
 sudo systemctl enable --now limbo
 ```
 
-### 5. E-paper display
+### 4. Prompt
 
-Install the Waveshare library and PIL:
-```bash
-pip3 install Pillow
-# Clone waveshare e-Paper lib to /home/llm/e-Paper
-```
-
-Place a TTF font at `/home/llm/limbo_font.ttf` (falls back to DejaVu Sans).
+Place the system prompt at `/home/llm/prompt.txt`. Use `CYCLE` and `PREV_MARK` as placeholders — `limbo.sh` substitutes them each cycle. The prompt must ask the model to end with a `PLAN:` section (shown on the blog) and a final `MARK:` line with exactly five words (the only thing passed on).
 
 ---
 
 ## Blog
 
-The blog auto-refreshes via JavaScript polling (`api.php` every 30s). New entries slide in at the top. Each post shows the received mark and the sent mark — the only continuity between cycles.
+Live at the configured URL. Auto-refreshes every 30 seconds via `api.php`. Infinite scroll loads older cycles. Each entry shows the camera image, the model's output split into Thinking Process and Plan sections, and the received/sent mark pair — the only thread between cycles.
+
+### Admin
+
+`admin.php` (not linked from the blog) is protected by `admin_password` in `config.php`:
+
+```php
+return [
+    'post_key'       => '...',
+    'admin_password' => 'choose-a-long-password',
+];
+```
+
+It lists all posts newest first with infinite scroll, camera images at their original 320×240 size (search by cycle number or text). Per row or in bulk:
+
+- **Delete** — removes the post permanently.
+- **Black out** — replaces the camera image with a black one; the original is kept in a separate `image_backup` table (never exposed by `api.php`) and can be **restored**.
+- **Export** — the whole database as JSON (blacked-out rows include `image_original`), the SQLite file itself, or all images as a zip.

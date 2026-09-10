@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # Usage: python3 led_photo.py "#1234"
-# Phase 1: live camera preview + 20s countdown → takes photo
+# Phase 1: live camera preview + countdown → takes photo
 # Phase 2: still image + blinking INFERENCE (until killed)
-# Writes: /tmp/limbo_cam.jpg, /tmp/limbo_cam_desc.txt, /tmp/limbo_cam_b64.txt
+# Writes: /tmp/limbo_cam.jpg (fresh photo), /tmp/limbo_photo_ready (flag for limbo.sh)
+# The blog dither (cam_dither.py) is run by limbo.sh once the flag exists.
 
+import os
 import sys
 import time
+import shutil
 import subprocess
 import threading
 import numpy as np
@@ -23,25 +26,46 @@ COUNTDOWN = 60
 
 LIVE_FILE  = '/tmp/led_live.jpg'
 PHOTO_FILE = '/tmp/limbo_cam.jpg'
-DESC_FILE  = '/tmp/limbo_cam_desc.txt'
-B64_FILE   = '/tmp/limbo_cam_b64.txt'
+READY_FILE = '/tmp/limbo_photo_ready'
+LIVE_SIZE  = (320, 240)    # preview frames, dithered down to 64x64 anyway
+PHOTO_SIZE = (1296, 972)   # final photo: native 2x2-binned mode of the ov5647, full field of view
 
 
-def capture_to(path):
-    try:
-        subprocess.run([
-            'libcamera-still', '-o', path, '--nopreview',
-            '-t', '400', '--gain', '8', '--width', '320', '--height', '240'
-        ], capture_output=True, timeout=6)
-        return True
-    except Exception:
-        pass
-    try:
-        subprocess.run(['fswebcam', '-r', '320x240', '--no-banner', path],
-                       capture_output=True, timeout=6)
-        return True
-    except Exception:
-        return False
+def log(msg):
+    sys.stderr.write(f'[led_photo] {msg}\n')
+    sys.stderr.flush()
+
+
+def capture_to(path, size=LIVE_SIZE):
+    """Capture one frame to path. True only if a new file was really written."""
+    w, h = size
+    tmp = path + '.part'
+    for cmd in (
+        ['libcamera-still', '-o', tmp, '--nopreview', '-t', '400', '--gain', '8',
+         '--width', str(w), '--height', str(h)],
+        ['fswebcam', '-r', f'{w}x{h}', '--no-banner', tmp],
+    ):
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=8)
+        except Exception:
+            continue
+        if r.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, path)   # atomic: readers never see a half-written file
+            return True
+    return False
+
+
+def capture_fresh(path, attempts=3):
+    for i in range(attempts):
+        if capture_to(path, PHOTO_SIZE):
+            return True
+        log(f'capture attempt {i + 1} failed')
+        time.sleep(0.7)
+    return False
 
 
 def dither(path):
@@ -50,15 +74,6 @@ def dither(path):
         return img.convert('1', dither=Image.FLOYDSTEINBERG).convert('RGB')
     except Exception:
         return Image.new('RGB', (W, H), BLACK)
-
-
-def process_in_background():
-    try:
-        with open(B64_FILE, 'w') as f:
-            subprocess.run(['python3', '/home/llm/cam_dither.py', PHOTO_FILE],
-                           stdout=f, stderr=subprocess.DEVNULL, timeout=30)
-    except Exception:
-        pass
 
 
 def run(cycle_label):
@@ -75,14 +90,15 @@ def run(cycle_label):
     # Shared state updated by camera thread
     current_frame = [Image.new('RGB', (W, H), BLACK)]
     capture_lock  = threading.Lock()
+    stop_live     = threading.Event()
 
     def camera_loop():
-        while True:
+        while not stop_live.is_set():
             if capture_to(LIVE_FILE):
                 img = dither(LIVE_FILE)
                 with capture_lock:
                     current_frame[0] = img
-            time.sleep(2.0)
+            stop_live.wait(2.0)
 
     t = threading.Thread(target=camera_loop, daemon=True)
     t.start()
@@ -110,12 +126,23 @@ def run(cycle_label):
         time.sleep(0.05)
 
     # --- Take final photo ---
-    capture_to(PHOTO_FILE)
-    still = dither(PHOTO_FILE)
-    threading.Thread(target=process_in_background, daemon=True).start()
-    open('/tmp/limbo_photo_ready', 'w').close()
+    # Stop the live loop first. Two libcamera-still processes at the same time make
+    # BOTH fail ("failed to allocate capture buffers"), and the old code did not check
+    # the exit code, so the previous cycle's photo silently stayed in place.
+    stop_live.set()
+    t.join(timeout=12)
 
-    # --- Phase 2: still + blinking INFERENCE ---
+    if not capture_fresh(PHOTO_FILE):
+        live_age = time.time() - os.path.getmtime(LIVE_FILE) if os.path.exists(LIVE_FILE) else 1e9
+        if live_age < 30:
+            shutil.copyfile(LIVE_FILE, PHOTO_FILE)
+            log(f'WARNING: photo capture failed, using last live frame ({live_age:.0f}s old)')
+        else:
+            log('WARNING: photo capture failed and no recent live frame, previous photo stays')
+    still = dither(PHOTO_FILE)
+    open(READY_FILE, 'w').close()
+
+    # --- Phase 2: still + blinking INFERENCE (camera stays off, CPU goes to inference) ---
     base = np.array(still)
 
     def make(show_inf):
