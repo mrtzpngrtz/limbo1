@@ -2,7 +2,13 @@
 $db = new SQLite3(__DIR__ . '/limbo.db');
 header('Content-Type: application/json');
 
-if (isset($_GET['before'])) {
+if (isset($_GET['cycle'])) {
+    $cycle = (int)$_GET['cycle'];
+    $stmt = $db->prepare('SELECT * FROM cycles WHERE cycle = :cycle AND cycle < 9000 LIMIT 1');
+    $stmt->bindValue(':cycle', $cycle, SQLITE3_INTEGER);
+    $res = $stmt->execute();
+    echo json_encode($res->fetchArray(SQLITE3_ASSOC) ?: null);
+} elseif (isset($_GET['before'])) {
     $before = (int)$_GET['before'];
     $stmt = $db->prepare('SELECT * FROM cycles WHERE cycle < 9000 AND id < :before ORDER BY id DESC LIMIT 20');
     $stmt->bindValue(':before', $before, SQLITE3_INTEGER);

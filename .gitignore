@@ -5,3 +5,7 @@ blog/*.apk
 *.OTF
 *.otf
 *.ttf
+config.php
+limbo.db
+*.apk
+*.cyberducksegment/

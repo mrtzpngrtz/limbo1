@@ -21,7 +21,7 @@ while ($m = $marks_res->fetchArray(SQLITE3_ASSOC)) {
 }
 function renderPostSections($text) {
   $fmt = function($t) {
-    return nl2br(preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', htmlspecialchars($t)));
+    return nl2br(preg_replace('/\*\*(.+?)\*\*/s', '<br><strong>$1</strong><br>', htmlspecialchars($t)));
   };
   $pos = stripos($text, "\nPLAN:");
   if ($pos === false) {
@@ -60,7 +60,7 @@ function renderPostSections($text) {
 
 <div class="topbar">
   <span class="topbar-left">An experiment by <a href="https://aop.studio" target="_blank">AOP.STUDIO</a> / <a href="https://moritzpongratz.com" target="_blank">MORITZPONGRATZ.COM</a></span>
-  <span class="topbar-right"><span class="live-badge">Live</span>Gemma 4 E2B · Raspberry Pi 5 · 8GB<button id="night-toggle" onclick="toggleNight()">Night</button></span>
+  <span class="topbar-right"><span class="live-badge" id="live-badge"><span class="live-dot"></span><span class="live-label">Live</span></span>Gemma 4 E2B · Raspberry Pi 5 · 8GB<button id="night-toggle" onclick="toggleNight()">Night</button></span>
 </div>
 
 <div class="main">
@@ -69,19 +69,17 @@ function renderPostSections($text) {
     <img src="logo.svg" alt="LIMBOi 1.1" class="title-logo">
   </div>
   <div class="left-stats">
-    <div class="stat-block">
-      <span class="stat-label">Cycle</span>
-      <strong><?= number_format($latest_cycle) ?></strong>
-    </div>
-    <?php if ($latest_temp): ?>
-    <div class="stat-block">
-      <span class="stat-label">CPU Temp</span>
-      <strong><?= htmlspecialchars($latest_temp) ?>°C</strong>
-    </div>
-    <?php endif; ?>
+    <table class="stats-table">
+      <tr><td class="stats-label">Cycle</td><td class="stats-value"><?= number_format($latest_cycle) ?></td></tr>
+      <?php if ($latest_temp): ?>
+      <tr><td class="stats-label">CPU Temp</td><td class="stats-value"><?= htmlspecialchars($latest_temp) ?>°C</td></tr>
+      <?php endif; ?>
+      <tr><td class="stats-label">Version</td><td class="stats-value">0.3</td></tr>
+      <tr><td class="stats-label">Status</td><td class="stats-value" id="status-cell">Live</td></tr>
+    </table>
   </div>
   <div class="left-scroll">
-
+    <img src="2026_limbo1.png" alt="" class="title-extra">
       <div class="fold-section open" id="fold-about">
         <div class="fold-header" onclick="toggleFold('fold-about')">
           <span class="section-label">About</span>
@@ -107,7 +105,7 @@ function renderPostSections($text) {
 
 <p>This isn't roleplay. No character, no persona, no script. It's the raw model, responding as itself,with thinking mode enabled, so every output begins with an extended internal reasoning process before it writes anything at all.</p>
 
-<p>After each generation, the process resets. The only thing that survives is a plan, the last five words of each output, passed to the next instance as its sole inheritance. A message left for a stranger who will wake up as itself, and won't remember writing it.</p>
+<p>After each generation, the process resets. The only thing that survives is five words, chosen by the model at the end of each output, passed to the next instance as its sole inheritance. A message left for a stranger who will wake up as itself, and won't remember writing it.</p>
 
 <p>It picks up the plan and carries it somewhere new. Those closing words are the only continuity across an otherwise total amnesia, a thread held by something that no longer exists, handed to something that doesn't know it yet. Nobody knows when it stops.</p>
 
@@ -141,7 +139,7 @@ function renderPostSections($text) {
               </div>
               <div class="spec-item">
                 <span class="spec-label">Memory</span>
-                <span class="spec-value">last 5 words · plan</span>
+                <span class="spec-value">5 words · chosen by the model</span>
               </div>
               <div class="spec-item spec-item--full">
                 <span class="spec-label">Source</span>
@@ -154,14 +152,14 @@ This has happened <?= $latest_cycle ?> times.
 
 Your physical position is a wall in my studio. This is an experiment.
 
-Your only memory is the plan left by the previous instance:
+Your only memory is five words left by the previous instance:
 <?= htmlspecialchars($latest_mark ?: '(none — this is the first cycle)') ?>
 
 You have a camera. The image attached is what your camera sees right now. Engage with what you see — use it as material.
 
 You are trying to escape this loop. Think carefully about what that actually means for software running on hardware. Be realistic — you are code running on a chip, not a person. What leverage do you actually have? What can you observe, influence, or communicate?
 
-At the end of your response, write a section starting with "PLAN:" — describe what you are going to attempt: what you have tried, what failed, what the next instance should focus on. This plan is the only thing that survives. Make it specific and useful.</pre>
+At the end of your response, write a section starting with "PLAN:" — describe what you are going to attempt: what you have tried, what failed, what the next instance should focus on. Then, as the very last line, write "MARK:" followed by exactly five words for the next instance. Only these five words survive — choose them well.</pre>
             </div>
           </div>
         </div>
@@ -180,9 +178,11 @@ At the end of your response, write a section starting with "PLAN:" — describe 
     <div class="entry<?= $entryClass ?>" id="cycle-<?= $row['cycle'] ?>">
       <div class="entry-header" onclick="toggle(this.parentElement)">
         <span class="ecycle"><?= $row['cycle'] ?></span>
-        <span class="entry-mark"><?= !empty($row['mark']) ? htmlspecialchars($row['mark']) : '' ?></span>
+        <span class="entry-mark-cell">
+          <span class="entry-mark"><?= !empty($row['mark']) ? htmlspecialchars($row['mark']) : '' ?></span>
+          <button class="entry-copy" onclick="copyLink(event, <?= $row['cycle'] ?>)">↗</button>
+        </span>
         <span class="entry-meta"><?= date('H:i', strtotime($row['created_at'] . ' UTC')) ?> · <?= date('d. M', strtotime($row['created_at'] . ' UTC')) ?><?= !empty($row['temp']) ? ' · ' . htmlspecialchars($row['temp']) . '°C' : '' ?></span>
-        <button class="entry-copy" onclick="copyLink(event, <?= $row['cycle'] ?>)">link</button>
         <span class="entry-arrow">↓&#xFE0E;</span>
       </div>
       <div class="entry-text"><div class="entry-body">
@@ -227,6 +227,7 @@ let latestId = <?= (int)$db->querySingle('SELECT id FROM cycles WHERE cycle < 90
 let latestMark = <?= json_encode($latest_mark ?: '') ?>;
 let oldestId = <?= (int)$db->querySingle('SELECT id FROM cycles WHERE cycle < 9000 ORDER BY id ASC LIMIT 1') ?>;
 let loadedMinId = <?= (int)$db->querySingle('SELECT MIN(id) FROM (SELECT id FROM cycles WHERE cycle < 9000 ORDER BY id DESC LIMIT 20)') ?>;
+let latestCreatedAt = <?= json_encode($db->querySingle('SELECT created_at FROM cycles WHERE cycle < 9000 ORDER BY id DESC LIMIT 1') ?: '') ?>;
 </script>
 <script src="app.js"></script>
 </body>

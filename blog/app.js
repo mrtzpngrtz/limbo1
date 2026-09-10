@@ -1,3 +1,18 @@
+function updateLiveStatus(createdAt) {
+  if (!createdAt) return;
+  latestCreatedAt = createdAt;
+  const isSleeping = Date.now() - new Date(createdAt.replace(' ', 'T') + 'Z').getTime() > 3600000;
+  const badge = document.getElementById('live-badge');
+  if (badge) {
+    badge.classList.toggle('offline', isSleeping);
+    badge.querySelector('.live-label').textContent = isSleeping ? 'Sleeping' : 'Live';
+  }
+  const statusCell = document.getElementById('status-cell');
+  if (statusCell) statusCell.textContent = isSleeping ? 'Sleeping' : 'Live';
+}
+
+setInterval(() => updateLiveStatus(latestCreatedAt), 60000);
+
 function toggleNight() {
   const isNight = document.body.classList.toggle('night');
   localStorage.setItem('nightMode', isNight ? '1' : '0');
@@ -61,7 +76,7 @@ function togglePostSection(hd) {
 }
 
 function applyBold(t) {
-  return t.replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>');
+  return t.replace(/\*\*(.+?)\*\*/gs, '<br><strong>$1</strong><br>');
 }
 
 function buildPostSections(text) {
@@ -102,9 +117,11 @@ function buildEntry(row, receivedMark) {
   div.innerHTML = `
     <div class="entry-header" onclick="toggle(this.parentElement)">
       <span class="ecycle">${row.cycle}</span>
-      <span class="entry-mark">${row.mark || ''}</span>
+      <span class="entry-mark-cell">
+        <span class="entry-mark">${row.mark || ''}</span>
+        <button class="entry-copy" onclick="copyLink(event, ${row.cycle})">↗</button>
+      </span>
       <span class="entry-meta">${time} · ${date}${row.temp ? ` · ${row.temp}°C` : ''}</span>
-      <button class="entry-copy" onclick="copyLink(event, ${row.cycle})">link</button>
       <span class="entry-arrow">↓&#xFE0E;</span>
     </div>
     <div class="entry-text"><div class="entry-body">${imgHtml}${buildPostSections(row.text)}</div>${marksHtml}</div>`;
@@ -126,6 +143,7 @@ function checkForNew() {
       const entry = buildEntry(row, latestMark);
       header.after(entry);
       if (row.mark) latestMark = row.mark;
+      updateLiveStatus(row.created_at);
 
       list.scrollTo({ top: 0, behavior: 'smooth' });
 
@@ -140,13 +158,30 @@ function checkForNew() {
 }
 
 setInterval(checkForNew, 30000);
+updateLiveStatus(latestCreatedAt);
 
 // Jump to linked cycle on page load
-if (location.hash) {
+if (location.hash && location.hash.startsWith('#cycle-')) {
   const target = document.querySelector(location.hash);
   if (target) {
     target.classList.add('open');
     setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+  } else {
+    const cycle = parseInt(location.hash.replace('#cycle-', ''), 10);
+    if (cycle) {
+      fetch(`api.php?cycle=${cycle}`)
+        .then(r => r.json())
+        .then(row => {
+          if (!row) return;
+          const entry = buildEntry(row, null);
+          entry.classList.remove('entry-new', 'entry-latest');
+          entry.classList.add('open', 'entry-linked');
+          const sentinel = document.getElementById('load-sentinel');
+          sentinel.parentNode.insertBefore(entry, sentinel);
+          setTimeout(() => entry.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+        })
+        .catch(() => {});
+    }
   }
 }
 
@@ -163,7 +198,7 @@ function loadMore() {
       const sentinel = document.getElementById('load-sentinel');
       rows.forEach((row, i) => {
         const entry = buildEntry(row, null);
-        entry.classList.remove('open', 'entry-new');
+        entry.classList.remove('open', 'entry-new', 'entry-latest');
         entry.classList.add('entry-lazy');
         entry.style.animationDelay = `${i * 60}ms`;
         list.insertBefore(entry, sentinel);
