@@ -52,7 +52,7 @@ Running at temperature 1.7. Outputs turn stranger, more associative, occasionall
 5. Runs `gemma4:e2b` via `run_with_image.py` (Ollama multimodal API)
 6. Extracts the five words after `MARK:` as the mark for the next cycle
 7. Displays output on the LED matrix (`led_display.py`)
-8. POSTs cycle, text, CPU temperature, mark, and camera image to the blog API
+8. Writes cycle, text, CPU temperature, mark, and camera image to an on-disk queue (`/home/llm/post_queue`) and POSTs the queue to the blog API, oldest first. Unsent posts survive network outages and are retried every cycle; posts the server rejects (HTTP 400/403) are parked in `post_queue/failed`
 9. Waits out the remaining minimum cycle time, then repeats
 
 ---

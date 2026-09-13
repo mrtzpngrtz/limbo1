@@ -3,6 +3,56 @@
 # --- Configuration ---
 MODEL_NAME="limbo"
 MIN_CYCLE_SECONDS=180
+POST_URL="https://aop.studio/limbo1/post.php"
+POST_KEY="Lmb0_X9k2P4mQ7rT"
+QUEUE_DIR="/home/llm/post_queue"
+
+# --- Blog post queue ---
+# Every post is written to disk first and sent from there, so a network outage
+# (or a dead blog) loses nothing: whatever is still waiting is retried each cycle,
+# oldest first. Posts the server rejects (4xx) are parked in $QUEUE_DIR/failed.
+enqueue_post() {   # cycle text temp mark image cam_desc
+    local d="$QUEUE_DIR/$(printf '%06d' "$1")" tmp
+    tmp="$QUEUE_DIR/.tmp-$(printf '%06d' "$1")"
+    mkdir -p "$tmp"
+    printf '%s' "$1" > "$tmp/cycle"
+    printf '%s' "$2" > "$tmp/text"
+    printf '%s' "$3" > "$tmp/temp"
+    printf '%s' "$4" > "$tmp/mark"
+    printf '%s' "$5" > "$tmp/image"
+    printf '%s' "$6" > "$tmp/cam_desc"
+    rm -rf "$d"
+    mv "$tmp" "$d"
+}
+
+flush_posts() {
+    local d code waiting
+    for d in "$QUEUE_DIR"/[0-9]*; do
+        [ -d "$d" ] || continue
+        code=$(curl -s -m 60 -o /dev/null -w '%{http_code}' "$POST_URL" \
+            --data-urlencode "key=${POST_KEY}" \
+            --data-urlencode "cycle@$d/cycle" \
+            --data-urlencode "text@$d/text" \
+            --data-urlencode "temp@$d/temp" \
+            --data-urlencode "mark@$d/mark" \
+            --data-urlencode "image@$d/image" \
+            --data-urlencode "cam_desc@$d/cam_desc")
+        case "$code" in
+            200)     rm -rf "$d" ;;
+            400|403) mkdir -p "$QUEUE_DIR/failed"; rm -rf "$QUEUE_DIR/failed/$(basename "$d")"; mv "$d" "$QUEUE_DIR/failed/"
+                     echo "  blog rejected cycle $(basename "$d") (HTTP $code), parked in failed/" ;;
+            *)   waiting=$(ls -d "$QUEUE_DIR"/[0-9]* 2>/dev/null | wc -l)
+                 echo "  blog unreachable (HTTP $code), $waiting post(s) waiting"
+                 return 1 ;;
+        esac
+    done
+}
+
+flush_posts_bg() {   # never two flushes at once, never block the cycle
+    ( flock -n 9 || exit 0; flush_posts ) 9>"$QUEUE_DIR/.lock" &
+}
+mkdir -p "$QUEUE_DIR"
+# --- end post queue ---
 
 # --- ANSI Colors ---
 RESET="\033[0m"
@@ -41,6 +91,9 @@ if [ -f "$COUNTER_FILE" ]; then
 else
     RESTART_COUNT=0
 fi
+
+# Anything that could not be posted before the restart goes out now
+flush_posts_bg
 
 # Capture startup image so first cycle has real camera data
 echo -e "${DIM}  capturing startup image...${RESET}"
@@ -138,15 +191,10 @@ while true; do
     # Read CPU temperature
     TEMP=$(awk '{printf "%.0f", $1/1000}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
 
-    # Post to blog
-    curl -s -X POST "https://aop.studio/limbo1/post.php" \
-      --data-urlencode "key=Lmb0_X9k2P4mQ7rT" \
-      --data-urlencode "cycle=${RESTART_COUNT}" \
-      --data-urlencode "text=${CLEAN_TEXT}" \
-      --data-urlencode "temp=${TEMP}" \
-      --data-urlencode "mark=${MARK}" \
-      --data-urlencode "image=${CAM_IMG}" \
-      --data-urlencode "cam_desc=${CAM_DESC}" > /dev/null &
+    # Post to blog: written to the queue first, then sent together with anything
+    # still waiting from earlier cycles (see flush_posts)
+    enqueue_post "$RESTART_COUNT" "$CLEAN_TEXT" "$TEMP" "$MARK" "$CAM_IMG" "$CAM_DESC"
+    flush_posts_bg
 
     echo ""
     echo -e "${DIM}${WHITE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
